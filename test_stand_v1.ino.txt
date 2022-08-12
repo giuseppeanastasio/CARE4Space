@@ -1,0 +1,143 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include "HX711.h"
+#include <Arduino.h>
+//Librerie
+
+
+
+/* Put your SSID & Password */
+const char* ssid = "TEST_STAND"; //Access Point SSID
+const char* password= "12345678"; //Access Point Password
+uint8_t max_connections=8;//Maximum Connection Limit for AP
+int current_stations=0, new_stations=0;
+/* Put IP Address details */
+IPAddress local_ip(192,168,1,1);
+IPAddress gateway(192,168,1,1);
+IPAddress subnet(255,255,255,0);
+
+
+
+// HX711 Pin
+const int LOADCELL_DOUT_PIN = 12;
+const int LOADCELL_SCK_PIN = 14;
+
+
+int valore;           //variabile cella di carico
+bool stato = false;   //stato del test
+
+HX711 scale;          //cella di carico
+
+ESP8266WebServer server(80);    //server
+
+void setup() {
+  Serial.begin(115200);
+
+  //led integrato per visualizzare stato
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+
+  //creazione AP
+  if(WiFi.softAP(ssid,password,1,false,max_connections)==true)
+  {
+    Serial.print("Access Point is Created with SSID: ");
+    Serial.println(ssid);
+    Serial.print("Max Connections Allowed: ");
+    Serial.println(max_connections);
+    Serial.print("Access Point IP: ");
+    Serial.println(WiFi.softAPIP());
+  }
+  else
+  {
+    Serial.println("Unable to Create Access Point");
+  }
+  WiFi.softAPConfig (local_ip, gateway, subnet);
+
+
+  //handle per gestire lo stato del programma
+  server.on("/", handle_OnConnect);
+  server.on("/start", handle_start);
+  server.on("/stop", handle_stop);
+  server.onNotFound(handle_NotFound);
+  
+  server.begin();
+  Serial.println("HTTP server started");
+
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  
+  scale.set_scale(-478.507);  // this value is obtained by calibrating the scale with known weights; see the README for details
+  scale.tare();               // reset the scale to 0
+}
+
+//funzione stop
+void handle_stop(){
+  stato = false;
+  Serial.println("STOP");
+  digitalWrite(LED_BUILTIN, HIGH);
+  server.send(200, "text/html", HTML());
+}
+
+//funzione start
+void handle_start(){
+  stato = true;
+  Serial.println("START");
+  digitalWrite(LED_BUILTIN, LOW);
+  server.send(200, "text/html", HTML());    //aggiornamento pagina html con nuovo stato
+}
+
+//funzione connessione
+void handle_OnConnect(){
+  stato = false;
+  Serial.println("STOP");
+  digitalWrite(LED_BUILTIN, HIGH);
+  server.send(200, "text/html", HTML());
+}
+
+void handle_NotFound(){
+  server.send(404, "text/plain", "Not found");
+}
+
+void loop() {
+  server.handleClient();    //gestione client
+  if(stato){
+    valore = scale.get_units();   
+    Serial.println(valore);       //trascrizione dei valori della cella nella porta seriale
+  }
+  delay(100);    //frequenza di campionamento
+  
+}
+
+
+//codice html della pagina
+String HTML()
+{
+  String msg="<!DOCTYPE html> <html>\n";
+  msg+="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
+  msg+="<title>ENGINE TEST STAND V1</title>\n";
+  msg+="<style>html{font-family:Helvetica; display:inline-block; margin:0px auto; text-align:center;}\n";
+  msg+="body{margin-top: 50px;} h1{color: #444444; margin: 50px auto 30px;} h3{color:#444444; margin-bottom: 50px;}\n";
+  msg+=".button{display:block; width:80px; background-color:#f48100; border:none; color:white; padding: 13px 30px; text-decoration:none; font-size:25px; margin: 0px auto 35px; cursor:pointer; border-radius:4px;}\n";
+  msg+=".button-on{background-color:#f48100;}\n";
+  msg+=".button-on:active{background-color:#f48100;}\n";
+  msg+=".button-off{background-color:#26282d;}\n";
+  msg+=".button-off:active{background-color:#26282d;}\n";
+  msg+="</style>\n";
+  msg+="</head>\n";
+  msg+="<body>\n";
+  msg+="<h1>ENGINE TEST STAND V1</h1>\n";
+  msg+="<h3>Press the button to control the test</h3>\n";
+
+
+  //pulsante
+  if(stato==false)
+  {
+    msg+="<p>TEST STATUS: STOP</p><a class=\"button button-on\" href=\"/start\">START</a>\n";    
+  }
+  else
+  {
+    msg+="<p>TEST STATUS: RUNNING</p><a class=\"button button-off\" href=\"/stop\">STOP</a>\n";
+  }
+  msg+="</body>\n";
+  msg+="</html>\n";
+  return msg;
+}
